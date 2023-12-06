@@ -116,8 +116,13 @@ class LSSodium
     {
         if ($this->bLibraryExists === true) {
             if (isset($sDataToEncrypt) && $sDataToEncrypt !== "") {
-                $sEncrypted = base64_encode(ParagonIE_Sodium_Compat::crypto_secretbox((string) $sDataToEncrypt, $this->sEncryptionNonce, $this->sEncryptionSecretBoxKey));
-                return $sEncrypted;
+                $nonce = random_bytes(ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES);
+                $encrypted = ParagonIE_Sodium_Compat::crypto_secretbox(
+                    (string) $sDataToEncrypt,
+                    $nonce,
+                    $this->sEncryptionSecretBoxKey
+                );
+                return ParagonIE_Sodium_Compat::bin2hex($nonce) . ParagonIE_Sodium_Compat::bin2hex($encrypted);
             }
             return '';
         }
@@ -136,7 +141,32 @@ class LSSodium
     {
         if ($this->bLibraryExists === true) {
             if (!empty($sEncryptedString) && $sEncryptedString !== 'null') {
-                $plaintext = ParagonIE_Sodium_Compat::crypto_secretbox_open(base64_decode($sEncryptedString), $this->sEncryptionNonce, $this->sEncryptionSecretBoxKey);
+                // attempt to decrypt string with the old method of using
+                // a static nonce
+                $plaintext = ParagonIE_Sodium_Compat::crypto_secretbox_open(
+                    base64_decode($sEncryptedString),
+                    $this->sEncryptionNonce,
+                    $this->sEncryptionSecretBoxKey
+                );
+                // minimum length (assuming empty message) is size of nonce
+                // plus the size of the authentication tag
+                $minLength = (
+                    ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES +
+                    ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_MACBYTES
+                );
+                // fall through to new method
+                // split the string into nonce and cipher text and decrypt
+                if ($plaintext === false && strlen($sEncryptedString) >= $minLength) {
+                    $nonceAndCipherText = ParagonIE_Sodium_Compat::hex2bin($sEncryptedString);
+                    $nonce = substr($nonceAndCipherText, 0, ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES);
+                    $ciphertext = substr($nonceAndCipherText, ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES);
+                    $plaintext = ParagonIE_Sodium_Compat::crypto_secretbox_open(
+                        $ciphertext,
+                        $nonce,
+                        $this->sEncryptionSecretBoxKey
+                    );
+                }
+                // neither method worked, error
                 if ($plaintext === false) {
                     throw new SodiumException(sprintf(gT("Wrong decryption key! Decryption key has changed since this data were last saved, so data can't be decrypted. Please consult our manual at %s.", 'unescaped'), 'https://manual.limesurvey.org/Data_encryption#Errors'));
                 } else {
