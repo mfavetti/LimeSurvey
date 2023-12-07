@@ -107,7 +107,8 @@ class LSSodium
                     );
                 }
                 // fall through to new method
-                // check that encrypted string is of sufficient length to
+                // if plaintext is still false, static nonce decryption failed
+                // also check that encrypted string is of sufficient length to
                 // contain at minimum the random nonce and authentication tag
                 // split the string into nonce and cipher text then decrypt
                 if ($plaintext === false && strlen($sEncryptedString) >= $minLength) {
