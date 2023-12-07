@@ -161,7 +161,7 @@ class LSSodium
             . " * See COPYRIGHT.php for copyright notices and details." . "\n"
             . " */" . "\n"
             . "\n"
-            . "/* " . "\n"
+            . "/*" . "\n"
             . "WARNING!!!" . "\n"
             . "ONCE SET, ENCRYPTION KEYS SHOULD NEVER BE CHANGED, OTHERWISE ALL ENCRYPTED DATA COULD BE LOST !!!" . "\n"
             . "\n"
