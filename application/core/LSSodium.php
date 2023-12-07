@@ -52,6 +52,7 @@ class LSSodium
         if ($this->bLibraryExists === true) {
             if (isset($plaintext) && $plaintext !== "") {
 
+                // old encryption method retained for testing
                 // return base64_encode(
                 //     ParagonIE_Sodium_Compat::crypto_secretbox(
                 //         (string) $plaintext,
@@ -143,7 +144,7 @@ class LSSodium
         $newKeyBin = ParagonIE_Sodium_Compat::crypto_secretbox_keygen();
         $newKeyHex = ParagonIE_Sodium_Compat::bin2hex($newKeyBin);
         // update app config
-        Yii::app()->setConfi("encryptionsecretboxkey", $newKeyHex);
+        Yii::app()->setConfig("encryptionsecretboxkey", $newKeyHex);
         // set class property
         $this->key = $newKeyBin;
         // generate config for security.php
