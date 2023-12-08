@@ -6,7 +6,6 @@
 class LSSodium
 {
     public $bLibraryExists = false;
-    protected $sEncryptionNonce = null;
     protected $sEncryptionSecretBoxKey = null;
 
     public function init()
@@ -38,17 +37,14 @@ class LSSodium
 
     /**
      *
-     * Check if encryption key and nonce exist in configuration and generate it if missing
+     * Check if encryption key exists in configuration and generate it if missing
      * @return void
      * @throws SodiumException
      */
     protected function checkIfKeyExists()
     {
-        if (empty(App()->getConfig('encryptionsecretboxkey')) && empty(App()->getConfig('encryptionnonce'))) {
+        if (empty(App()->getConfig('encryptionsecretboxkey'))) {
             $this->generateEncryptionKeys();
-        }
-        if ($this->sEncryptionNonce === null) {
-            $this->sEncryptionNonce = $this->getEncryptionNonce();
         }
         if ($this->sEncryptionSecretBoxKey === null) {
             $this->sEncryptionSecretBoxKey = $this->getEncryptionSecretBoxKey();
@@ -116,8 +112,26 @@ class LSSodium
     {
         if ($this->bLibraryExists === true) {
             if (isset($sDataToEncrypt) && $sDataToEncrypt !== "") {
-                $sEncrypted = base64_encode(ParagonIE_Sodium_Compat::crypto_secretbox((string) $sDataToEncrypt, $this->sEncryptionNonce, $this->sEncryptionSecretBoxKey));
-                return $sEncrypted;
+
+                // old encryption method retained for testing
+                // return base64_encode(
+                //     ParagonIE_Sodium_Compat::crypto_secretbox(
+                //         (string) $sDataToEncrypt,
+                //         $this->getEncryptionNonce(),
+                //         $this->sEncryptionSecretBoxKey
+                //     )
+                // );
+
+                // generate a random nonce
+                $nonce = random_bytes(ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES);
+                // encrypt plaintext with key and nonce
+                $ciphertext = ParagonIE_Sodium_Compat::crypto_secretbox(
+                    (string) $sDataToEncrypt,
+                    $nonce,
+                    $this->sEncryptionSecretBoxKey
+                );
+                // concatenate random nonce and cipher text as hex
+                return ParagonIE_Sodium_Compat::bin2hex($nonce) . ParagonIE_Sodium_Compat::bin2hex($ciphertext);
             }
             return '';
         }
@@ -136,7 +150,41 @@ class LSSodium
     {
         if ($this->bLibraryExists === true) {
             if (!empty($sEncryptedString) && $sEncryptedString !== 'null') {
-                $plaintext = ParagonIE_Sodium_Compat::crypto_secretbox_open(base64_decode($sEncryptedString), $this->sEncryptionNonce, $this->sEncryptionSecretBoxKey);
+                // assume ciphertext cannot be decrypted
+                $plaintext = false;
+                // minimum length (assuming empty message) is size of nonce
+                // plus the size of the authentication tag
+                $minLength = (
+                    ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES +
+                    ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_MACBYTES
+                );
+                // check that encrypted string is of sufficient length to
+                // contain at minimum the random nonce and authentication tag
+                // split the string into nonce and cipher text then try to decrypt
+                if (strlen($sEncryptedString) >= $minLength) {
+                    $nonceAndCipherText = ParagonIE_Sodium_Compat::hex2bin($sEncryptedString);
+                    $nonce = substr($nonceAndCipherText, 0, ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES);
+                    $ciphertext = substr($nonceAndCipherText, ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES);
+                    $plaintext = ParagonIE_Sodium_Compat::crypto_secretbox_open(
+                        $ciphertext,
+                        $nonce,
+                        $this->sEncryptionSecretBoxKey
+                    );
+                }
+                // attempt to decrypt string with the old method of using
+                // a static nonce and base 64 encoding if the new method
+                // did not work and we have a static nonce to try
+                if ($plaintext === false) {
+                    $nonce = $this->getEncryptionNonce();
+                    if($nonce) {
+                        $plaintext = ParagonIE_Sodium_Compat::crypto_secretbox_open(
+                            base64_decode($sEncryptedString),
+                            $nonce,
+                            $this->sEncryptionSecretBoxKey
+                        );
+                    }
+                }
+                // neither method worked, error
                 if ($plaintext === false) {
                     throw new SodiumException(sprintf(gT("Wrong decryption key! Decryption key has changed since this data were last saved, so data can't be decrypted. Please consult our manual at %s.", 'unescaped'), 'https://manual.limesurvey.org/Data_encryption#Errors'));
                 } else {
@@ -161,14 +209,13 @@ class LSSodium
 //            // Never replace an existing file
 //            throw new CException(500, gT("Configuration file already exist"));
 //        }
-        $sEncryptionNonce = sodium_bin2hex(random_bytes(ParagonIE_Sodium_Compat::CRYPTO_SECRETBOX_NONCEBYTES));
         $sEncryptionSecretBoxKey = sodium_bin2hex(ParagonIE_Sodium_Compat::crypto_secretbox_keygen());
         // old keys used for encryption are still available as a backup if they have been used before
         $sEncryptionKeypair = sodium_bin2hex($this->getEncryptionKey());
         $sEncryptionPublicKey = sodium_bin2hex($this->getEncryptionPublicKey());
         $sEncryptionSecretKey = sodium_bin2hex($this->getEncryptionSecretKey());
 
-        if (empty($sEncryptionNonce) || empty($sEncryptionSecretBoxKey)) {
+        if (empty($sEncryptionSecretBoxKey)) {
             return;
         }
 
@@ -185,7 +232,7 @@ class LSSodium
             . " * See COPYRIGHT.php for copyright notices and details." . "\n"
             . " */" . "\n"
             . "\n"
-            . "/* " . "\n"
+            . "/*" . "\n"
             . "WARNING!!!" . "\n"
             . "ONCE SET, ENCRYPTION KEYS SHOULD NEVER BE CHANGED, OTHERWISE ALL ENCRYPTED DATA COULD BE LOST !!!" . "\n"
             . "\n"
@@ -201,11 +248,9 @@ class LSSodium
         if ($sEncryptionSecretKey) {
             $sConfig .= "\$config['encryptionsecretkey'] = '" . $sEncryptionSecretKey . "';" . "\n";
         }
-        $sConfig .= "\$config['encryptionnonce'] = '" . $sEncryptionNonce . "';" . "\n"
-            . "\$config['encryptionsecretboxkey'] = '" . $sEncryptionSecretBoxKey . "';" . "\n"
-            . "return \$config;";
+        $sConfig .= "\$config['encryptionsecretboxkey'] = '" . $sEncryptionSecretBoxKey . "';" . "\n";
+        $sConfig .= "return \$config;";
 
-        Yii::app()->setConfig("encryptionnonce", $sEncryptionNonce);
         Yii::app()->setConfig("encryptionsecretboxkey", $sEncryptionSecretBoxKey);
         $configdir = \Yii::app()->getConfig('configdir');
         if (is_writable($configdir)) {
